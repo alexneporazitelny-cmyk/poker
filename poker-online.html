@@ -1,0 +1,193 @@
+<!DOCTYPE html><html lang="sk"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Poker Stôl – online bez servera</title>
+<style>
+:root{--g:#c9ff00;--bg:#07120f}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font-family:system-ui,sans-serif;min-height:100vh;padding:env(safe-area-inset-top) 10px env(safe-area-inset-bottom)}
+#lobby{max-width:340px;margin:12vh auto;text-align:center}
+input,button{font:inherit;border-radius:12px;border:0;padding:12px;width:100%;margin:6px 0}
+input{background:#13251f;color:#fff}.go{background:var(--g);color:#000;font-weight:800}
+#table{display:none;max-width:560px;margin:0 auto}
+.felt{background:radial-gradient(#1b6b46,#0d3d2a);border-radius:24px;padding:14px;margin:8px 0;text-align:center}
+.pot{font-weight:800;color:var(--g);font-size:18px}
+.board{display:flex;gap:6px;justify-content:center;margin:10px 0;min-height:56px}
+.c{background:#fff;color:#111;border-radius:7px;padding:6px 0;width:38px;font-weight:800;font-size:17px}
+.c.r{color:#d11}.c.b{background:repeating-linear-gradient(45deg,#2a4bd7,#2a4bd7 4px,#1d36a0 4px,#1d36a0 8px);color:transparent}
+.seats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.seat{background:#13251f;border:2px solid transparent;border-radius:12px;padding:6px;font-size:12px}
+.seat.turn{border-color:var(--g)}.seat.out{opacity:.4}.seat.me{background:#1b3a2f}
+.seat .cs{display:flex;gap:3px;justify-content:center;margin:4px 0}.seat .c{width:26px;font-size:12px;padding:3px 0}
+#bar{height:8px;background:#13251f;border-radius:4px;overflow:hidden;margin:8px 0}#bar i{display:block;height:100%;background:var(--g);width:0}
+#acts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+#acts button{font-weight:800;color:#fff;padding:12px 4px}#acts small{display:block;font-size:15px;opacity:.9;min-height:18px}
+#acts button:disabled{opacity:.3}.f{background:#c0392b}.bt{background:#2980b9}.rs{background:#27ae60}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script></head><body>
+<div id="lobby"><h2>♠ Poker Stôl ♥</h2><p id="sub">Zábavné žetóny • každý začína s 5000</p>
+ <input id="nm" placeholder="Tvoje meno" maxlength="14">
+ <button class="go" id="gob" onclick="start_()">ZALOŽIŤ STÔL</button></div>
+<div id="table">
+ <details class="felt" id="inv" open><summary>📲 Naskenuj a hraj</summary>
+  <img id="qr" width="200" height="200" style="background:#fff;border-radius:12px;margin:8px"></details>
+ <div class="felt"><div class="pot" id="pot"></div><div class="board" id="board"></div><div id="msg"></div></div>
+ <div class="seats" id="seats"></div><div id="bar"><i id="fill"></i></div>
+ <div id="acts"><button class="f" id="bf" onclick="go('fold')">FOLD<small>&nbsp;</small></button>
+  <button class="bt" id="bb" onclick="go('bet')"></button><button class="rs" id="br" onclick="go('raise')"></button></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);let st,conn,isHost=false;
+const room=new URLSearchParams(location.search).get('room');
+if(room){$('gob').textContent='PRIPOJIŤ SA'}
+function start_(){const name=$('nm').value.trim()||'Hráč';room?joinGame(name):hostGame(name)}
+function hostGame(name,tries=0){
+ const pin=String(1000+Math.floor(Math.random()*9000)),peer=new Peer('pkr-'+pin);isHost=true;
+ peer.on('error',e=>{if(e.type=='unavailable-id'&&tries<5)hostGame(name,tries+1);else $('sub').textContent='Chyba spojenia: '+e.type});
+ peer.on('open',()=>{
+  const url=location.origin+location.pathname+'?room='+pin;
+  
+  $('qr').src='https://api.qrserver.com/v1/create-qr-code/?size=200x200&data='+encodeURIComponent(url);
+  const h=hook({host:true,readyState:1,send:s=>{st=JSON.parse(s);draw()}});h.msg({t:'join',name});
+  window.hostHook=h;show();
+ });
+ peer.on('connection',c=>{
+  const h=hook({readyState:1,send:s=>{if(c.open)c.send(s)}});
+  c.on('data',d=>h.msg(JSON.parse(d)));c.on('close',h.close);
+ });
+}
+function joinGame(name){
+ const peer=new Peer();
+ peer.on('error',e=>$('sub').textContent='Chyba: '+e.type+' (je stôl zapnutý?)');
+ peer.on('open',()=>{
+  conn=peer.connect('pkr-'+room);
+  conn.on('open',()=>{conn.send(JSON.stringify({t:'join',name}));$('inv').style.display='none';show()});
+  conn.on('data',d=>{st=JSON.parse(d);draw()});
+  conn.on('close',()=>$('msg').textContent='Zakladateľ stola sa odpojil – koniec hry');
+ });
+}
+function show(){$('lobby').style.display='none';$('table').style.display='block'}
+function go(a){
+ $('acts').querySelectorAll('button').forEach(b=>b.disabled=true);
+ isHost?hostHook.msg({t:'act',a}):conn.send(JSON.stringify({t:'act',a}));
+}
+function card(c,big){
+ if(c=='?')return '<div class="c b">?</div>';
+ const s={s:'♠',h:'♥',d:'♦',c:'♣'}[c[1]];
+ return `<div class="c ${'hd'.includes(c[1])?'r':''}">${c[0]=='T'?'10':c[0]}${s}</div>`;
+}
+
+function draw(){
+ 
+ const m=st.p.find(p=>p.id==st.me);
+ $('pot').textContent='Bank: '+st.pot;$('msg').textContent=st.msg;
+ $('board').innerHTML=st.board.map(card).join('');
+ $('seats').innerHTML=st.p.map(p=>`<div class="seat ${p.id==st.turn?'turn':''} ${!p.in||p.fold?'out':''} ${p.id==st.me?'me':''}">
+  <b>${p.name}${p.id==st.dealer?' Ⓓ':''}</b><div class="cs">${p.cards.map(card).join('')}</div>
+  💰 ${p.chips}${p.allin?' ALL-IN':''}<br>${p.b?'Stávka: '+p.b:''}${p.hand?'<br>'+p.hand:''}</div>`).join('');
+ const mine=st.turn==st.me,toCall=m?st.bet-m.b:0;
+ $('bb').innerHTML=toCall?`BET<small>${Math.min(toCall,m.chips)}</small>`:`CHECK<small>&nbsp;</small>`;
+ $('br').innerHTML=`RAISE<small>${st.bet?st.bet*2:50}</small>`;
+ $('bf').disabled=!mine;$('bb').disabled=!mine;$('br').disabled=!mine||!m||m.chips<=toCall;
+}
+setInterval(()=>{
+ if(!st)return;const t=st.turn?Math.max(0,(st.dl-Date.now())/15000):0;
+ $('fill').style.width=t*100+'%';$('fill').style.background=t<.33?'#e74c3c':'';
+},100);
+
+// ===== Dealer (beží v prehliadači zakladateľa stola) =====
+const R='23456789TJQKA',S='shdc',START=5000,SB=25,BB=50,TIME=15000;
+const NAMES=['Vysoká karta','Pár','Dva páry','Trojica','Postupka','Farba','Full house','Štvorica','Postupka farby'];
+function sc5(c){
+  const r=c.map(x=>x[0]).sort((a,b)=>b-a),cnt={};r.forEach(x=>cnt[x]=(cnt[x]||0)+1);
+  const g=Object.keys(cnt).map(Number).sort((a,b)=>cnt[b]-cnt[a]||b-a),fl=c.every(x=>x[1]==c[0][1]);
+  let st=-1;if(g.length==5){if(r[0]-r[4]==4)st=r[0];else if(r.join()=='12,3,2,1,0')st=3}
+  const a=cnt[g[0]],b=cnt[g[1]]||0;
+  const cat=st>=0&&fl?8:a==4?7:a==3&&b==2?6:fl?5:st>=0?4:a==3?3:a==2&&b==2?2:a==2?1:0;
+  return cat*1e10+(st>=0?[st]:g).reduce((s,x)=>s*13+x,0);
+}
+function best(cs){
+  const c=cs.map(x=>[R.indexOf(x[0]),x[1]]);let m=0;
+  for(let i=0;i<7;i++)for(let j=i+1;j<7;j++)m=Math.max(m,sc5(c.filter((_,k)=>k!=i&&k!=j)));
+  return m;
+}
+function send(rm){
+  rm.p.forEach(p=>{if(!p.ws||p.ws.readyState!=1)return;
+    p.ws.send(JSON.stringify({me:p.id,ph:rm.ph,board:rm.board,pot:rm.pot,bet:rm.bet,dl:rm.dl,msg:rm.msg,
+      turn:rm.turn>=0?rm.p[rm.turn].id:null,dealer:rm.p[rm.dealer]?.id,
+      p:rm.p.map(q=>({id:q.id,name:q.name,chips:q.chips,b:q.b,fold:q.fold,in:q.in,allin:q.allin,hand:rm.show&&q.in&&!q.fold?q.hn:'',
+        cards:!q.in?[]:(q.id==p.id||(rm.show&&!q.fold))?q.c:['?','?']}))}))});
+}
+function put(rm,p,amt){const a=Math.min(amt,p.chips);p.chips-=a;p.b+=a;p.tot+=a;rm.pot+=a;if(!p.chips)p.allin=true}
+function start(rm){
+  clearTimeout(rm.t);rm.p=rm.p.filter(p=>p.ws&&p.ws.readyState==1);rm.p.forEach(p=>{if(p.chips<=0)p.chips=START});
+  if(rm.p.length<2){rm.ph='wait';rm.turn=-1;rm.dl=0;rm.show=false;rm.msg='Čakáme na hráčov (min. 2)';return send(rm)}
+  rm.show=false;rm.board=[];rm.pot=0;rm.ph='pre';rm.deck=[];
+  for(const r of R)for(const s of S)rm.deck.push(r+s);
+  for(let i=51;i>0;i--){const j=(crypto.getRandomValues(new Uint32Array(1))[0]%(i+1));[rm.deck[i],rm.deck[j]]=[rm.deck[j],rm.deck[i]]}
+  rm.p.forEach(p=>{p.c=[rm.deck.pop(),rm.deck.pop()];p.b=p.tot=0;p.fold=p.allin=p.acted=false;p.in=true;p.hn=''});
+  const n=rm.p.length;rm.dealer=(rm.dealer+1)%n;
+  const sb=n==2?rm.dealer:(rm.dealer+1)%n,bb=(sb+1)%n;
+  put(rm,rm.p[sb],SB);put(rm,rm.p[bb],BB);rm.bet=BB;rm.turn=(bb+1)%n;
+  rm.msg='Dealer rozdal karty';ask(rm);
+}
+function ask(rm){rm.dl=Date.now()+TIME;send(rm);clearTimeout(rm.t);rm.t=setTimeout(()=>act(rm,rm.p[rm.turn],'auto'),TIME)}
+function act(rm,p,a){
+  if(!p||rm.turn<0||rm.p[rm.turn]!==p)return;
+  const toCall=rm.bet-p.b;if(a=='auto')a=toCall?'fold':'bet';
+  if(a=='raise'&&p.chips<=toCall)a='bet';
+  if(a=='fold'){p.fold=true;rm.msg=p.name+': FOLD'}
+  else if(a=='raise'){
+    const target=rm.bet?rm.bet*2:BB;put(rm,p,target-p.b);
+    if(p.b>rm.bet){rm.bet=p.b;rm.p.forEach(q=>{if(q!==p)q.acted=false})}
+    rm.msg=p.name+': '+(toCall?'RAISE na ':'BET ')+p.b;
+  }else{put(rm,p,toCall);rm.msg=p.name+(toCall?': BET '+toCall:': CHECK')}
+  p.acted=true;next(rm);
+}
+function next(rm){
+  clearTimeout(rm.t);const live=rm.p.filter(p=>p.in&&!p.fold);
+  if(live.length==1)return end(rm);
+  if(live.filter(p=>!p.allin).every(p=>p.acted&&p.b==rm.bet))return street(rm);
+  let i=rm.turn;do{i=(i+1)%rm.p.length}while(!(rm.p[i].in&&!rm.p[i].fold&&!rm.p[i].allin));
+  rm.turn=i;ask(rm);
+}
+function street(rm){
+  rm.p.forEach(p=>{p.b=0;p.acted=false});rm.bet=0;
+  if(rm.ph=='river')return end(rm);
+  const nx={pre:['flop',3],flop:['turn',1],turn:['river',1]}[rm.ph];rm.ph=nx[0];
+  for(let i=0;i<nx[1];i++)rm.board.push(rm.deck.pop());
+  const can=rm.p.filter(p=>p.in&&!p.fold&&!p.allin);
+  if(can.length<2){rm.turn=-1;rm.dl=0;send(rm);return void(rm.t=setTimeout(()=>street(rm),1500))}
+  let i=rm.dealer;do{i=(i+1)%rm.p.length}while(!(rm.p[i].in&&!rm.p[i].fold&&!rm.p[i].allin));
+  rm.turn=i;ask(rm);
+}
+function end(rm){
+  clearTimeout(rm.t);rm.turn=-1;rm.dl=0;rm.ph='show';
+  const live=rm.p.filter(p=>p.in&&!p.fold);
+  if(live.length>1){rm.show=true;while(rm.board.length<5)rm.board.push(rm.deck.pop());
+    live.forEach(p=>{p.v=best(p.c.concat(rm.board));p.hn=NAMES[Math.floor(p.v/1e10)]})}
+  const lv=[...new Set(rm.p.filter(p=>p.tot>0).map(p=>p.tot))].sort((a,b)=>a-b),won=new Set();let prev=0;
+  for(const L of lv){
+    const part=rm.p.filter(p=>p.tot>=L),amt=(L-prev)*part.length;prev=L;
+    let el=part.filter(p=>p.in&&!p.fold);if(!el.length)el=live;
+    const m=Math.max(...el.map(p=>p.v||0)),w=el.filter(p=>(p.v||0)==m);
+    w.forEach(p=>{p.chips+=Math.floor(amt/w.length);won.add(p.name+(p.hn&&live.length>1?' ('+p.hn+')':''))});
+  }
+  rm.msg='🏆 Vyhráva: '+[...won].join(', ');send(rm);rm.t=setTimeout(()=>start(rm),6000);
+}
+
+const RM={p:[],board:[],pot:0,ph:'wait',dealer:-1,turn:-1,bet:0,dl:0,msg:'Čakáme na hráčov (min. 2)'};
+let hostMe=null;
+function hook(ws){let me;return{
+ msg(m){
+  if(m.t=='join'&&!me){
+   if(RM.p.length>=9)return;
+   me={id:Math.random().toString(16).slice(2,10),name:String(m.name||'Hráč').slice(0,14),chips:START,ws,in:false,fold:true,b:0,tot:0,c:[]};
+   RM.p.push(me);if(ws.host)hostMe=me;send(RM);
+   if(RM.ph=='wait'&&RM.p.length>=2)setTimeout(()=>RM.ph=='wait'&&start(RM),2500);
+  }else if(m.t=='act'&&me&&['fold','bet','raise'].includes(m.a))act(RM,me,m.a);
+ },
+ close(){
+  if(!me)return;me.ws=null;
+  if(RM.p[RM.turn]===me)act(RM,me,'fold');
+  else{if(me.in)me.fold=true;if(RM.turn>=0&&RM.p.filter(p=>p.in&&!p.fold).length==1)end(RM);else send(RM)}
+ }}}
+</script></body></html>
